@@ -25,7 +25,7 @@ if str(_ROOT) not in sys.path:
 from agents.crew import CodeLensCrew
 from tools.payments import (
     can_run_analysis, consume_use, create_checkout_session,
-    free_uses_remaining, get_or_create_user,
+    free_uses_remaining, get_or_create_user, get_user,
     save_pending_analysis, get_pending_analysis, clear_pending_analysis,
     process_successful_payment,
 )
@@ -2281,7 +2281,7 @@ def render_sidebar() -> None:
             with _t1:
                 st.markdown(_sun_svg, unsafe_allow_html=True)
             with _t2:
-                st.toggle("Theme", key="cl_appearance_toggle", label_visibility="collapsed")
+                st.toggle("Theme", key="cl_appearance_toggle", label_visibility="collapsed", disabled=st.session_state.get("_analysis_running", False))
             with _t3:
                 st.markdown(_moon_svg, unsafe_allow_html=True)
         with _ctrl_r:
@@ -2293,7 +2293,8 @@ def render_sidebar() -> None:
             new_theme = "dark" if st.session_state.cl_appearance_toggle else "light"
             st.session_state["theme"] = new_theme
             st.query_params["theme"] = new_theme
-            st.rerun()
+            if not st.session_state.get("_analysis_running", False):
+                st.rerun()
 
         st.markdown(
             """
@@ -2398,6 +2399,32 @@ def render_sidebar() -> None:
             </div>
             """
             st.markdown(profile_html, unsafe_allow_html=True)
+            _u = get_user(user.get("username", "")) or {}
+            _free = int(_u.get("free_uses_remaining", 0))
+            _paid = int(_u.get("paid_uses_remaining", 0))
+            _total = _free + _paid
+            _pill_color = "#4cd964" if _total > 0 else "#DA4848"
+            st.markdown(
+                f"""
+                <div style="margin-top:12px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.09); border-radius:14px; padding:12px 14px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                        <span style="color:#8ea2bc; font-size:0.78rem; font-weight:600; letter-spacing:0.04em; text-transform:uppercase;">Analyses Available</span>
+                        <span style="background:{_pill_color}22; color:{_pill_color}; font-size:0.8rem; font-weight:700; border-radius:999px; padding:2px 10px;">{_total} left</span>
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <div style="flex:1; background:rgba(255,255,255,0.06); border-radius:10px; padding:8px 10px; text-align:center;">
+                            <div style="color:#FFC570; font-size:1.1rem; font-weight:800;">{_free}</div>
+                            <div style="color:#8ea2bc; font-size:0.72rem; margin-top:2px;">Free</div>
+                        </div>
+                        <div style="flex:1; background:rgba(255,255,255,0.06); border-radius:10px; padding:8px 10px; text-align:center;">
+                            <div style="color:#6BAFFF; font-size:1.1rem; font-weight:800;">{_paid}</div>
+                            <div style="color:#8ea2bc; font-size:0.72rem; margin-top:2px;">Paid</div>
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
         else:
             st.markdown('<div class="sidebar-section-label">Account</div>', unsafe_allow_html=True)
             render_oauth_button()
@@ -6673,9 +6700,7 @@ def render_recommendation_card(verdict: dict[str, Any]) -> None:
                 <p style="margin:0; font-family:Georgia, serif; font-size:13.5px; line-height:1.85; color:#3a4a5c;">
                     {html.escape(summary_text)}
                 </p>
-                <p style="margin:12px 0 0 0; font-family:Georgia, serif; font-size:13.5px; line-height:1.85; color:#3a4a5c;">
-                    {html.escape(reasoning_text)}
-                </p>
+                {f'<p style="margin:12px 0 0 0; font-family:Georgia, serif; font-size:13.5px; line-height:1.85; color:#3a4a5c;">{html.escape(reasoning_text)}</p>' if reasoning_text and reasoning_text != summary_text else ""}
             </div>
             <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(26,50,99,0.12); display:flex; gap:8px; align-items:flex-start;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="margin-top:1px; flex-shrink:0;">
@@ -6766,6 +6791,35 @@ def render_analyze_tab() -> None:
             )
             render_workflow_steps()
             st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
+        _is_running = st.session_state.get("_analysis_running", False)
+        if _is_running:
+            _started = st.session_state.get("_last_analysis_started_ts")
+            if _started is None or (time.time() - float(_started)) > 900:
+                st.session_state["_analysis_running"] = False
+                _is_running = False
+        if _is_running:
+            st.markdown(
+                """
+                <style>
+                /* Lock entire page during analysis — no pointer events on any interactive element */
+                [data-testid="stMain"] input,
+                [data-testid="stMain"] textarea,
+                [data-testid="stMain"] button,
+                [data-testid="stMain"] [data-testid="stFileUploadDropzone"],
+                [data-testid="stMain"] [data-testid="stFileUploaderDeleteBtn"],
+                [data-testid="stMain"] [data-baseweb="select"],
+                [data-testid="stMain"] [data-baseweb="tab"],
+                [data-testid="stSidebar"] input,
+                [data-testid="stSidebar"] button,
+                [data-testid="stSidebar"] [data-baseweb="select"] {
+                    pointer-events: none !important;
+                    opacity: 0.45 !important;
+                    cursor: not-allowed !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
         _pending_gh = st.session_state.pop("pending_github_url", "") or ""
         _pending_jd = st.session_state.pop("pending_job_description", "") or ""
         _pending_co = st.session_state.pop("pending_company_url", "") or ""
@@ -6800,7 +6854,6 @@ def render_analyze_tab() -> None:
                 placeholder="https://github.com/company/repo",
                 key="company_url_input",
             )
-        _is_running = st.session_state.get("_analysis_running", False)
         analyze_clicked = st.button(
             "Analyzing..." if _is_running else "Analyze Repository",
             use_container_width=True,
@@ -6838,7 +6891,10 @@ def render_analyze_tab() -> None:
     if st.session_state.pop("_payment_cancelled", False):
         st.info("Payment cancelled. You can try again when you're ready.")
 
-    if analyze_clicked:
+    # Phase 1: on click, immediately lock the UI and queue the analysis.
+    # The guard on _analysis_running ensures a queued second click (double-click)
+    # is ignored because _analysis_running is already True by the time it processes.
+    if analyze_clicked and not st.session_state.get("_analysis_running", False):
         if not github_url.strip():
             st.error("Please enter a GitHub repository URL to analyze.")
         else:
@@ -6871,41 +6927,62 @@ def render_analyze_tab() -> None:
                     else:
                         st.session_state["_last_analysis_started_ts"] = time.time()
                         st.session_state["_analysis_running"] = True
-                        try:
-                            with st.status("Starting analysis...", expanded=True) as status_box:
-                                result = run_analysis_pipeline(
-                                    github_url=github_url.strip(),
-                                    uploaded_file=uploaded_file,
-                                    job_description=job_description,
-                                    company_github_url=company_github_url.strip(),
-                                    status_box=status_box,
-                                )
-                            consume_use(username, reason)
-                            st.session_state["_analysis_running"] = False
-                            st.session_state["last_result"] = result
-                            st.session_state["last_github_url"] = github_url.strip()
-                            st.session_state["last_error"] = None
-                            st.session_state["render_id"] = uuid.uuid4().hex
-                            st.session_state["active_view"] = "overview"
-                            save_analysis_to_history(
-                                result=result,
-                                github_url=github_url.strip(),
-                                had_resume=uploaded_file is not None,
-                                had_jd=bool(job_description.strip()),
-                                resume_bytes=uploaded_file.getvalue() if uploaded_file is not None else None,
-                                job_description=job_description,
-                            )
-                        except Exception as exc:
-                            st.session_state["_analysis_running"] = False
-                            st.session_state["last_result"] = None
-                            detail = format_exception_for_user(exc)
-                            st.session_state["last_error"] = {
-                                "message": "Analysis could not be completed. Please review the inputs and try again.",
-                                "details": detail,
-                            }
-                            st.error(st.session_state["last_error"]["message"])
-                            with st.expander("Details"):
-                                st.code(detail, language="text")
+                        st.session_state["_queued_analysis"] = {
+                            "github_url": github_url.strip(),
+                            "job_description": job_description,
+                            "company_github_url": company_github_url.strip(),
+                            "resume_bytes": uploaded_file.getvalue() if uploaded_file is not None else None,
+                            "resume_name": uploaded_file.name if uploaded_file is not None else None,
+                            "had_resume": uploaded_file is not None,
+                            "had_jd": bool(job_description.strip()),
+                            "reason": reason,
+                            "username": username,
+                        }
+                        st.rerun()
+
+    # Phase 2: execute the queued analysis now that the UI is locked.
+    _queued = st.session_state.pop("_queued_analysis", None)
+    if _queued and st.session_state.get("_analysis_running", False):
+        _resume_file = None
+        if _queued.get("resume_bytes"):
+            class _ResumeProxy:
+                name = _queued["resume_name"]
+                def getvalue(self_): return _queued["resume_bytes"]  # noqa: N805
+                def read(self_): return _queued["resume_bytes"]  # noqa: N805
+            _resume_file = _ResumeProxy()
+        try:
+            with st.status("Starting analysis...", expanded=True) as status_box:
+                result = run_analysis_pipeline(
+                    github_url=_queued["github_url"],
+                    uploaded_file=_resume_file,
+                    job_description=_queued["job_description"],
+                    company_github_url=_queued["company_github_url"],
+                    status_box=status_box,
+                )
+            consume_use(_queued["username"], _queued["reason"])
+            st.session_state["last_result"] = result
+            st.session_state["last_github_url"] = _queued["github_url"]
+            st.session_state["last_error"] = None
+            st.session_state["render_id"] = uuid.uuid4().hex
+            st.session_state["active_view"] = "overview"
+            save_analysis_to_history(
+                result=result,
+                github_url=_queued["github_url"],
+                had_resume=_queued["had_resume"],
+                had_jd=_queued["had_jd"],
+                resume_bytes=_queued.get("resume_bytes"),
+                job_description=_queued["job_description"],
+            )
+        except Exception as exc:
+            st.session_state["last_result"] = None
+            detail = format_exception_for_user(exc)
+            st.session_state["last_error"] = {
+                "message": "Analysis could not be completed. Please review the inputs and try again.",
+                "details": detail,
+            }
+        finally:
+            st.session_state["_analysis_running"] = False
+        st.rerun()
 
     if st.session_state.get("last_result"):
         st.markdown(
@@ -7120,7 +7197,7 @@ def render_login_page() -> None:
             with s1:
                 st.markdown(sun_svg, unsafe_allow_html=True)
             with s2:
-                st.toggle("Theme", key="cl_appearance_toggle", label_visibility="collapsed")
+                st.toggle("Theme", key="cl_appearance_toggle", label_visibility="collapsed", disabled=st.session_state.get("_analysis_running", False))
             with s3:
                 st.markdown(moon_svg, unsafe_allow_html=True)
 
@@ -7128,7 +7205,8 @@ def render_login_page() -> None:
             new_theme = "dark" if st.session_state.cl_appearance_toggle else "light"
             st.session_state["theme"] = new_theme
             st.query_params["theme"] = new_theme
-            st.rerun()
+            if not st.session_state.get("_analysis_running", False):
+                st.rerun()
 
     with right_col:
         st.markdown(

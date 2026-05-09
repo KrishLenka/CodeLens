@@ -238,16 +238,19 @@ def _strict_json_mode() -> bool:
     if override in {"0", "false", "no", "off"}:
         return False
     model_name = (os.getenv("OPENROUTER_MODEL") or "").strip().lower()
-    prompt_json_models = (
-        "claude-opus-4.6",
-        "claude-sonnet-4",
-        "deepseek/deepseek-chat",
-        "deepseek/deepseek-chat-v3",
-        "deepseek/deepseek-chat-v3-0324",
-        "deepseek-chat",
-        "deepseek-chat-v3",
+    # Use exact segment matching so "claude-sonnet-4" doesn't accidentally
+    # match "claude-sonnet-4-5" or "claude-sonnet-4-6".
+    import re as _re
+    prompt_json_patterns = (
+        r"claude-opus-4\.6(?!\d)",
+        r"claude-sonnet-4(?![-.\d])",
+        r"claude-haiku",          # Bedrock rejects large compiled grammars
+        r"deepseek/deepseek-chat(?!-v\d)",
+        r"deepseek/deepseek-chat-v3(?!-\d)",
+        r"deepseek-chat(?!-v\d)",
+        r"deepseek-chat-v3(?!-\d)",
     )
-    return not any(model in model_name for model in prompt_json_models)
+    return not any(_re.search(p, model_name) for p in prompt_json_patterns)
 
 
 def _format_model_json_error(candidate: str, *, reason: str) -> str:
@@ -592,6 +595,19 @@ class CodeLensCrew:
         ai_report = reports.get("ai_usage") or {}
         resume_report = reports.get("resume_match") or {}
 
+        # Coerce any score fields that arrived as strings (common in prompt-only JSON mode)
+        int_fields = (
+            "overall_quality_score", "ai_usage_score", "commit_health_score",
+            "resume_match_score", "job_fit_score", "company_style_fit",
+        )
+        for _f in int_fields:
+            v = out.get(_f)
+            if isinstance(v, str):
+                try:
+                    out[_f] = int(float(v))
+                except (ValueError, TypeError):
+                    out[_f] = None
+
         if not isinstance(out.get("commit_health_score"), int):
             out["commit_health_score"] = commit_report.get("commit_health_score")
         if not isinstance(out.get("ai_usage_score"), int):
@@ -746,14 +762,51 @@ class CodeLensCrew:
             if include_resume
             else "Set `resume_match` to null (no resume was provided).\n"
         )
+        resume_schema = (
+            '  "resume_match": {\n'
+            '    "resume_match_score": <integer 0-100>,\n'
+            '    "project_verdicts": [{"project_name": "<str>", "claimed": "<str>", "reality": "<str>", "match_quality": "<str>", "specific_notes": "<str>"}],\n'
+            '    "skill_verdicts": [{"skill": "<str>", "verdict": "confirmed|partial|not_found", "evidence": "<str>"}],\n'
+            '    "undeclared_skills": ["<str>"],\n'
+            '    "inflation_flags": ["<str>"],\n'
+            '    "summary": "<str>"\n'
+            "  }\n"
+            if include_resume
+            else '  "resume_match": null\n'
+        )
         return (
-            "Produce ONE JSON object matching the schema with nested fields: "
-            "commit_behavior, code_quality, ai_usage"
-            f"{', resume_match' if include_resume else ' (resume_match null)'}.\n\n"
+            "Produce ONE valid JSON object — no extra text before or after — with EXACTLY these fields:\n"
+            "{\n"
+            '  "commit_behavior": {\n'
+            '    "commit_health_score": <integer 0-100>,\n'
+            '    "velocity_assessment": "<str>",\n'
+            '    "suspicious_patterns": [{"pattern": "<str>", "evidence": "<str>"}],\n'
+            '    "positive_signals": ["<str>"],\n'
+            '    "summary": "<str>"\n'
+            "  },\n"
+            '  "code_quality": {\n'
+            '    "quality_score": <integer 0-100>,\n'
+            '    "readability_score": <integer 0-100>,\n'
+            '    "strengths": [{"observation": "<str>", "location": "<str>"}],\n'
+            '    "concerns": [{"concern": "<str>", "severity": "low|medium|high", "location": "<str>"}],\n'
+            '    "bugs_or_errors": [{"description": "<str>", "file": "<str>", "line": "<str or null>"}],\n'
+            '    "summary": "<str>"\n'
+            "  },\n"
+            '  "ai_usage": {\n'
+            '    "ai_usage_score": <integer 0-100>,\n'
+            '    "ai_evidence_signals": [{"signal": "<str>", "location": "<str>", "interpretation": "<str>"}],\n'
+            '    "hallucination_flags": [{"flag": "<str>", "location": "<str>"}],\n'
+            '    "vibe_coding_flags": ["<str>"],\n'
+            '    "good_ai_usage": ["<str>"],\n'
+            '    "baseline_similarity": {"human": <float 0-1>, "ai": <float 0-1>},\n'
+            '    "summary": "<str>"\n'
+            "  },\n"
+            f"{resume_schema}"
+            "}\n\n"
             "Cover in order: (1) commits and commit_patterns vs repo_metadata, (2) code quality from files + "
-            "knowledge_graph, (3) AI usage vs baseline_comparison and code, "
-            f"{'(4) resume claims vs code evidence. ' if include_resume else ''}"
-            "Keep string fields concise; limit open-ended lists to what is most informative.\n\n"
+            "knowledge_graph, (3) AI usage vs baseline_comparison and code"
+            f"{', (4) resume claims vs code evidence' if include_resume else ''}.\n"
+            "Keep string fields concise; limit open-ended lists to what is most informative.\n"
             f"{resume_line}\n"
             "Analysis data:\n"
             f"{self.analysis_json}"
@@ -975,9 +1028,29 @@ class CodeLensCrew:
             f"{resume_instruction}"
             f"{job_instruction}"
             f"{company_style_instruction}"
-            "For skill_map, map skills to confirmed, partial, or not_found based on the available evidence.\n"
-            "Prior task JSON outputs are your primary evidence; use the supplementary block only for job/resume/metadata context.\n"
-            "Return only JSON matching the schema.\n\n"
+            "For skill_map, map each skill name to exactly one of: confirmed, partial, or not_found.\n"
+            "Prior task JSON outputs are your primary evidence; use the supplementary block only for job/resume/metadata context.\n\n"
+            "Return ONLY a valid JSON object with EXACTLY these fields — no extra text before or after:\n"
+            "{\n"
+            '  "overall_quality_score": <integer 0-100>,\n'
+            '  "ai_usage_score": <integer 0-100>,\n'
+            '  "commit_health_score": <integer 0-100>,\n'
+            '  "resume_match_score": <integer 0-100 or null>,\n'
+            '  "job_fit_score": <integer 0-100 or null>,\n'
+            '  "strengths": ["<specific strength>"],\n'
+            '  "concerns": ["<specific concern>"],\n'
+            '  "skill_map": {"<skill>": "confirmed|partial|not_found"},\n'
+            '  "vibe_coding_flags": ["<flag>"],\n'
+            '  "ai_usage_summary": "<paragraph>",\n'
+            '  "bugs_found": ["<bug>"],\n'
+            '  "resume_inflation_flags": ["<flag>"],\n'
+            '  "job_fit_analysis": "<paragraph or null>",\n'
+            '  "company_style_fit": <integer 0-100 or null>,\n'
+            '  "recommendation": "strong_hire|hire|maybe|pass",\n'
+            '  "recommendation_reasoning": "<detailed paragraph>",\n'
+            '  "summary": "<2-3 sentence executive summary>",\n'
+            '  "disclaimer": "CodeLens provides probabilistic signals to assist human judgment. All findings should be verified in a technical interview."\n'
+            "}\n\n"
             "Supplementary context (metadata, job, resume, file overview — not full source):\n"
             f"{self._analysis_summary_for_judge()}"
         )

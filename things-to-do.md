@@ -1,0 +1,10 @@
+- Push change that allows users to see number of available analyses
+- Clean up README.md
+- Switch to a better model for better outputs
+- FIX UI:
+	- Make the ui look less like ai streamlit slop
+	- On v0:
+		- 
+- Post on LinkedIn
+	- Pictures from presentation
+	- Make a gif scrolling down the analysis page
