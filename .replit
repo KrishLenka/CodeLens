@@ -1,4 +1,4 @@
-modules = ["python-3.12"]
+modules = ["python-3.11", "python-3.12"]
 [agent]
 expertMode = true
 
@@ -36,3 +36,11 @@ externalPort = 80
 [deployment]
 deploymentTarget = "autoscale"
 run = ["streamlit", "run", "app.py", "--server.port", "5000", "--server.address", "0.0.0.0", "--server.enableCORS", "false", "--server.enableXsrfProtection", "false"]
+
+[userenv]
+
+[userenv.shared]
+SUPABASE_URL = "https://sjfdxfumifdkhqfowlmz.supabase.co"
+SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqZmR4ZnVtaWZka2hxZm93bG16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzY4NjMxOCwiZXhwIjoyMDkzMjYyMzE4fQ.8FW03hz3zlIJKil5vjQhquc0MRsCqKWHMu9VxdYiPVc"
+STRIPE_PRICE_ID = "price_1TVGS5K4adtjGGApoWU4IjRi"
+STRIPE_SECRET_KEY = "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"
