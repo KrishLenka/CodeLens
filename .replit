@@ -22,8 +22,8 @@ name = "Start application"
 author = "agent"
 
 [[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
+task = "shell.exec"
+args = "streamlit run app.py --server.port 5000 --server.address 0.0.0.0 --server.enableCORS false --server.enableXsrfProtection false"
 
 [workflows.workflow.metadata]
 outputType = "webview"
