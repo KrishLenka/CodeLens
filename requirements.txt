@@ -1,4 +1,3 @@
-streamlit
 crewai
 llama-index
 pinecone-client
@@ -16,4 +15,7 @@ pypdf
 plotly
 supabase
 stripe
-streamlit-cookies-controller
+fastapi
+uvicorn[standard]
+python-multipart
+PyJWT

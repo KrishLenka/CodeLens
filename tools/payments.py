@@ -24,7 +24,7 @@ def _cfg() -> tuple[str, str, str, str]:
         os.getenv("SUPABASE_URL", "").rstrip("/"),
         os.getenv("SUPABASE_SERVICE_KEY", ""),
         os.getenv("STRIPE_PRICE_ID", ""),
-        os.getenv("APP_URL", "http://localhost:8501").rstrip("/"),
+        os.getenv("FRONTEND_URL", os.getenv("APP_URL", "http://localhost:3000")).rstrip("/"),
     )
 
 
